@@ -1,0 +1,65 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+jobs:
+  testes:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.14"
+          cache: pip
+          cache-dependency-path: aula_26-10_microsservicos/microsservicos_mq/pedidos_api/requirements*.txt
+
+      - name: Instalar dependências
+        run: pip install -r aula_26-10_microsservicos/microsservicos_mq/pedidos_api/requirements.txt -r aula_26-10_microsservicos/microsservicos_mq/pedidos_api/requirements-dev.txt
+
+      - name: Executar testes
+        working-directory: aula_26-10_microsservicos/microsservicos_mq/pedidos_api
+        run: pytest -q
+  imagem:
+    needs: testes
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    env:
+      PUBLICAR: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Definir nome da imagem
+        run: echo "IMAGEM=ghcr.io/${GITHUB_REPOSITORY,,}/pedidos-api" >> "$GITHUB_ENV"
+
+      - uses: docker/setup-buildx-action@v4
+
+      - uses: docker/login-action@v4
+        if: env.PUBLICAR == 'true'
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/metadata-action@v6
+        id: meta
+        with:
+          images: ${{ env.IMAGEM }}
+          tags: |
+            type=sha
+            type=raw,value=latest,enable={{is_default_branch}}
+      - uses: docker/build-push-action@v7
+        with:
+          context: aula_26-10_microsservicos/microsservicos_mq/pedidos_api
+          push: ${{ env.PUBLICAR == 'true' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
