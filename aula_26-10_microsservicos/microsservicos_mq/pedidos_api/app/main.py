@@ -8,8 +8,6 @@ from fastapi import Depends, FastAPI, HTTPException, status
 from pydantic import BaseModel, EmailStr, Field
 
 EXCHANGE = "pedidos"
-
-
 class PublicadorRabbit:
     def __init__(self, url: str):
         self._params = pika.URLParameters(url)
@@ -18,7 +16,6 @@ class PublicadorRabbit:
         with pika.BlockingConnection(self._params) as con:
             canal = con.channel()
             canal.exchange_declare(exchange=EXCHANGE, exchange_type="fanout", durable=True)
-            canal.confirm_delivery()
             canal.basic_publish(
                 exchange=EXCHANGE,
                 routing_key="",
@@ -27,34 +24,22 @@ class PublicadorRabbit:
                     content_type="application/json",
                     delivery_mode=pika.DeliveryMode.Persistent,
                     message_id=evento["id"],
-                    type="pedido.criado",
                 ),
-                mandatory=True,
             )
-
-
 def obter_publicador() -> PublicadorRabbit:
     return PublicadorRabbit(os.environ["AMQP_URL"])
 
-
-app = FastAPI(title="Serviço de Pedidos", version="1.1.0")
-
-
+app = FastAPI(title="Serviço de Pedidos", version="1.0.0")
 class PedidoEntrada(BaseModel):
     cliente: str = Field(min_length=3, max_length=120)
     email: EmailStr
     valor_total: float = Field(gt=0)
-
-
 class PedidoRecebido(BaseModel):
     id: str
     status: str
-
-
 @app.get("/saude")
 def saude():
     return {"api": "ok"}
-
 
 @app.post("/pedidos", response_model=PedidoRecebido, status_code=status.HTTP_202_ACCEPTED)
 def criar_pedido(entrada: PedidoEntrada, publicador: PublicadorRabbit = Depends(obter_publicador)):
@@ -67,8 +52,6 @@ def criar_pedido(entrada: PedidoEntrada, publicador: PublicadorRabbit = Depends(
     }
     try:
         publicador.publicar(evento)
-    except pika.exceptions.UnroutableError:
-        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "Nenhuma fila ligada à exchange de pedidos")
     except pika.exceptions.AMQPError:
         raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "Broker de mensagens indisponível")
     return {"id": evento["id"], "status": "RECEBIDO"}
